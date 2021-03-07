@@ -1,0 +1,39 @@
+- module: sklearn.ensemble
+  name: RandomForestClassifier
+  params:
+    n_estimators: [1000, 1500, 2000, 2500]
+    criterion: ['entropy']
+    max_depth: [100]
+    min_samples_split: [20]
+    min_samples_leaf: [10]
+    max_features: ['sqrt']
+    n_jobs: [4]
+- module: sklearn.linear_model
+  name: LogisticRegression
+  params:
+      penalty: ['l1', 'l2']
+      solver: ['liblinear']
+      C: [0.1, 1, 10]
+      max_iter: [10000]
+- module: sklearn.neighbors
+  name: KNeighborsClassifier
+  params:
+      n_neighbors: [5, 50]
+      p: [1, 2]
+- module: sklearn.naive_bayes
+  name: GaussianNB
+  params: {}
+- module: sklearn.ensemble
+  name: GradientBoostingClassifier
+  params:
+      learning_rate: [0.1]
+      n_estimators: [1000, 1500, 2000, 2500]
+      min_samples_split: [20]
+      min_samples_leaf: [10]
+      max_depth: [100]
+- module: sklearn.tree
+  name: DecisionTreeClassifier
+  params:
+    max_depth: [1000]
+    min_samples_split: [20, 200]
+    min_samples_leaf: [10, 100]

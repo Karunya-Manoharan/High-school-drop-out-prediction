@@ -1,0 +1,180 @@
+/* This is a txt file containing useful sql queries for our work
+    that we can build upon/add to as we go. 
+    
+    I would suggest using single line comment (-- begin) atop query with
+    brief explanation for its purpose
+    
+*/
+
+-- Select query for all students in grade 9 or above with grade and school_year
+with all_students as (
+select distinct student_lookup, grade, school_year
+from clean.all_snapshots as2 
+where grade >= 9
+order by student_lookup)
+select student_lookup, grade, school_year as entry_year
+from ( SELECT *, ROW_NUMBER() OVER
+		  (PARTITION BY student_lookup, grade ORDER BY student_lookup) AS rnum
+		  FROM all_students) t
+where t.rnum = 1;
+
+
+
+
+-- VIEW for high school withdraw reasons for all students
+-- Used for grade entry year and ultimate withdraw reason (e.g., graduated, dropped out...)
+--
+create or replace view sketch.hs_withdraw_info AS
+WITH grads AS (
+    	select distinct student_lookup, school_year
+	        from clean.all_snapshots as2
+	        where grade = 12  and withdraw_reason = 'graduate'
+    )
+    , dropouts AS (
+		select distinct student_lookup, school_year, withdraw_reason 
+		    from clean.all_snapshots as2
+		    where grade >= 9 and withdraw_reason like '%dropout%' or withdraw_reason like '%expel%'
+   )
+    , transfers AS (
+  		select distinct student_lookup, school_year
+	        from clean.all_snapshots as2
+	        where grade >= 9 and grade <= 12 and withdraw_reason like '%in state%'
+       )
+   , transfer_out AS (
+  		select distinct student_lookup, school_year
+	        from clean.all_snapshots as2
+	        where grade >= 9 and grade <= 12
+	        	and withdraw_reason like '%transfer%' 
+	        	and not withdraw_reason like '%in state%'
+       )
+   , withdraws AS ( 
+        select distinct student_lookup, school_year
+            from clean.all_snapshots as2 
+            where grade >= 9 and grade <= 12 and withdraw_reason like '%withdrew%'
+            )
+select distinct asn.student_lookup, asn.grade, asn.school_year AS entry_year,
+        g.school_year as grad_year,
+        case when g.school_year is null then 1 else 0 end as "grad_year_missing",
+        d.school_year as dropout_year,
+        case when d.school_year is null then 1 else 0 end as "dropout_year_missing",
+        t.school_year as in_state_transfer_year,
+        case when t.school_year is null then 1 else 0 end as "in_state_transfer_year_missing",
+        tout.school_year as transfer_out_year,
+        case when tout.school_year is null then 1 else 0 end as "transfer_out_year_missing",
+        w.school_year as withdrew_year, 
+        case when w.school_year is null then 1 else 0 end as "withdrew_year_missing",
+        case when g.school_year is null 
+        		  and d.school_year is null
+        		  and t.school_year is null
+        		  and tout.school_year is null
+        		  and w.school_year is null
+        		  then 1 else 0 end as "all_missing"
+from clean.all_snapshots asn left join grads g on asn.student_lookup = g.student_lookup
+                        left join dropouts d on asn.student_lookup = d.student_lookup
+                        left join transfers t on asn.student_lookup = t.student_lookup
+                        left join transfer_out tout on asn.student_lookup = tout.student_lookup
+                        left join withdraws w on asn.student_lookup = w.student_lookup
+where asn.grade between 9 and 12
+order by asn.student_lookup;
+
+-- Deduplicate the hs_withdraw info View
+select * from (
+SELECT *, ROW_NUMBER() OVER
+  (PARTITION BY student_lookup, grade ORDER BY student_lookup) AS rnum
+  FROM sketch.hs_withdraw_info hwi) t
+ where t.rnum = 1;
+
+
+-- VIEW for one place to query student_lookup with grade_9 -> grade_12 gpa as columns
+--
+create view sketch.gpa_by_grade AS
+WITH nine AS (
+    	select distinct asn.student_lookup, asn.grade, hsg.gpa
+			from clean.all_snapshots asn left join clean.high_school_gpa hsg
+			on (asn.student_lookup=hsg.student_lookup and asn.school_year = hsg.school_year)
+			where asn.grade = 9
+			order by asn.student_lookup
+    )
+    , ten AS (
+    	select distinct asn.student_lookup, asn.grade, hsg.gpa
+			from clean.all_snapshots asn left join clean.high_school_gpa hsg
+			on (asn.student_lookup=hsg.student_lookup and asn.school_year = hsg.school_year)
+			where asn.grade = 10
+			order by asn.student_lookup
+	)
+    ,  elev AS (
+    	select distinct asn.student_lookup, asn.grade, hsg.gpa
+			from clean.all_snapshots asn left join clean.high_school_gpa hsg
+			on (asn.student_lookup=hsg.student_lookup and asn.school_year = hsg.school_year)
+			where asn.grade = 11
+			order by asn.student_lookup
+	)
+    , twel AS (
+    	select distinct asn.student_lookup, asn.grade, hsg.gpa
+			from clean.all_snapshots asn left join clean.high_school_gpa hsg
+			on (asn.student_lookup=hsg.student_lookup and asn.school_year = hsg.school_year)
+			where asn.grade = 10
+			order by asn.student_lookup
+	)
+	select distinct asn.student_lookup, 
+        n.gpa as gpa_9,
+        t.gpa as gpa_10,
+        e.gpa as gpa_11,
+        tw.gpa as gpa_12
+	from clean.all_snapshots asn left join nine n on asn.student_lookup = n.student_lookup
+                        left join ten t on asn.student_lookup = t.student_lookup
+                        left join elev e on asn.student_lookup = e.student_lookup
+                        left join twel tw on asn.student_lookup = tw.student_lookup
+    where asn.grade between 9 and 12
+	order by asn.student_lookup;
+
+-- Ranking students within school by 9th grade gpa
+select distinct as2.student_lookup, as2.school_year, as2.district, coalesce(school_code,school_name) as school, gbg.gpa_9,
+	dense_rank() over (partition by as2.school_year, as2.district, coalesce(school_code,school_name)
+		order by gbg.gpa_9 DESC) as school_gpa_9_rank,
+	ntile(10) over (partition by as2.school_year, as2.district, coalesce(school_code,school_name)
+		order by gbg.gpa_9 DESC) as school_gpa_9_decile
+from clean.all_snapshots as2 join sketch.gpa_by_grade gbg on as2.student_lookup = gbg.student_lookup
+where as2.grade = 9 and school_year >= 2007 and gbg.gpa_9 is not null
+order by as2.school_year, as2.district, coalesce(school_code,school_name), gbg.gpa_9 DESC;
+
+-- 7th to 9th grades marks by course with school info
+with school_info as (
+	select distinct student_lookup, grade, district, school_name, school_code
+	from clean.all_snapshots
+	)
+select ag.student_lookup, si.district, coalesce(si.school_code,si.school_name) as school, 
+	ag.course_code, ag.course_name , ag.grade , ag.mark , ag.school_year 
+from clean.all_grades ag left join school_info si 
+	on ag.student_lookup = si.student_lookup and ag.grade = si.grade
+where ag.term like '%Final%' and ag.grade >=7 and ag.grade <= 9;
+
+
+-- Query to receive 9th grade gpa and GPA ranking/decile. 
+create view sketch.grade_9_gpa AS
+with gpa_table as (
+WITH nine AS (
+    	select distinct asn.student_lookup, asn.grade, hsg.gpa
+			from clean.all_snapshots asn left join clean.high_school_gpa hsg
+			on (asn.student_lookup=hsg.student_lookup and asn.school_year = hsg.school_year)
+			where asn.grade = 9
+			order by asn.student_lookup
+    )
+	select distinct asn.student_lookup, 
+        n.gpa as gpa_9
+	from clean.all_snapshots asn left join nine n on asn.student_lookup = n.student_lookup
+    --where asn.grade between 9 and 12
+	order by asn.student_lookup
+)
+select distinct as2.student_lookup, as2.school_year, as2.district, coalesce(school_code,school_name) as school, 
+	coalesce (gbg.gpa_9, 0) as gpa_9,
+	case when coalesce (gbg.gpa_9, 0) = 0 then 1 else 0 end as "gpa_9_missing",
+	dense_rank() over (partition by as2.school_year, as2.district, coalesce(school_code,school_name)
+		order by coalesce (gbg.gpa_9, 0) DESC) as school_gpa_9_rank,
+	case when coalesce (gbg.gpa_9, 0) != 0 then
+		ntile(10) over (partition by as2.school_year, as2.district, coalesce(school_code,school_name), case when coalesce (gbg.gpa_9, 0) = 0 then 1 else 0 end
+			order by coalesce (gbg.gpa_9, 0) DESC) 
+		else null end as school_gpa_9_decile
+from clean.all_snapshots as2 join gpa_table gbg on as2.student_lookup = gbg.student_lookup
+where as2.grade >= 9 and school_year >= 2007
+order by as2.school_year, as2.district, coalesce(school_code,school_name), coalesce (gbg.gpa_9, 0) DESC;

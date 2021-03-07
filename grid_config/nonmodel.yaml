@@ -1,0 +1,35 @@
+splitter:
+    !YearSplitter
+        train_len: 1
+        test_len: 1
+        gap: 2
+        year_col: 'entry_year'
+labeler:
+    !GradYearLabeler
+        grad_cols: ['grad_year', 'grade_12_entry_year']
+        entry_col: 'entry_year'
+        max_diff: 2
+        withdraw_columns: ['dropout_year']
+        drop_columns: ['in_state_transfer_year', 'transfer_out_year']
+imputer:
+    !AverageImputer
+        default_method: 'median'
+        col_methods: {}
+        regex_methods: {'absent':'zero',
+                        '_pl_':'zero',
+                        'special_ed':'zero',
+                        'disability':'zero',
+                        'disadvantagement':'zero',
+                        'inv_':'zero',
+                        'discipline':'zero'}
+loaders:
+    absence_discipline: {}
+    demographics_grade_10: {}
+    disability_and_intervention: {}
+    grade_9_gpa: {}
+    marks: {}
+    repeat_grade_count: {}
+    school_district: {}
+    std_test: {}
+
+preprocessor: []
